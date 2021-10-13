@@ -1,11 +1,16 @@
 
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { Snapshot, tokens, ZeroAddress, increaseTime} = require("./helpers");
+const { Snapshot, tokens, ZeroAddress, increaseTime, timeLimit, ether} = require("./helpers");
 
 describe("Swapz Test Suite", () => {
     let swapz, router, factory, eth, pair, trader1, trader2, trader3, addresses;
     const snapshot = new Snapshot();
+
+    const swapTokens = async (amountSold , tokenSold , tokenBought, router , trader ) => {
+        await tokenSold.connect(trader).approve(router.address, amountSold);
+        await router.connect(trader).swapExactTokensForTokensSupportingFeeOnTransferTokens(amountSold, 0, [tokenSold.address, tokenBought.address], trader.address, timeLimit(60));
+      };
 
     before('Deployment Snapshot', async () => {
 
@@ -20,6 +25,8 @@ describe("Swapz Test Suite", () => {
         await swapz.deployed();
 
         await swapz['mint(uint256)'](tokens("10000000"));
+        await swapz['mint(address,uint256)'](owner.address, tokens("1000000"));
+
 
         const Factory = await ethers.getContractFactory('UniswapV2Factory');
         factory = await Factory.deploy(owner.address);
@@ -28,6 +35,11 @@ describe("Swapz Test Suite", () => {
         const ETH = await ethers.getContractFactory('WETH9');
         eth = await ETH.deploy();
         await eth.deployed();
+        
+        owner.sendTransaction({
+            to: eth.address, 
+            value: ether("200")
+        });
 
         const ROUTER = await ethers.getContractFactory('UniswapV2Router02');
         router = await ROUTER.deploy(factory.address, eth.address);
@@ -35,14 +47,21 @@ describe("Swapz Test Suite", () => {
 
         await factory.createPair(swapz.address, eth.address);
         let pairAddress = await factory.getPair(swapz.address, eth.address);
+        //console.log(pairAddress);
         pair = await ethers.getContractAt("UniswapV2Pair", pairAddress);
 
-        //await swapz['mint(uint256)'](tokens("10000000"));
+        // initiates LGE whitelist
+        durations = [1200, 600];
+        amountsMax = [tokens("1000"), tokens("5000")];
+        const addresses = [owner.address, trader1.address, trader2.address];
+        await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
+        await swapz.modifyLGEWhitelist(0, 1200, tokens("10000"), addresses, true);
+        //adding liquidity
+        await swapz.approve(router.address, tokens("200000"));
+        await eth.approve(router.address, ether("200"));
+        await router.addLiquidity(swapz.address, eth.address, tokens("200000"), ether("200"), tokens("1"), ether("1"), owner.address, timeLimit(60));
 
-        //const addresses = [pairAddress.address, deployer.address, holder5.address, holder10.address, holder20.address, holder40.address];
-        
-        await snapshot.snapshot();
-        
+        await snapshot.snapshot();  
     });
     
     afterEach("Revert", async () => {
@@ -68,13 +87,13 @@ describe("Swapz Test Suite", () => {
         });
 
         it("should have a total supply of 10 Million", async () => {
-            expect(await swapz.totalSupply()).equal(tokens("10000000"));
+            expect(await swapz.totalSupply()).equal(tokens("11000000"));
         });
         
         it("should mint 100,000,000 tokens to the owner account", async () => {
             //await swapz['mint(address, uint256)'](owner.address, tokens("10000000"));
             // await swapz.mint(tokens("10000000")); // this didn't work!!! look into this
-            expect(await swapz.balanceOf(owner.address)).equal(tokens("10000000"));
+            expect(await swapz.balanceOf(owner.address)).equal(tokens("10800000"));
         });
 
         it("should have deployer as owner", async () => {
@@ -90,17 +109,16 @@ describe("Swapz Test Suite", () => {
             await swapz.transfer(trader1.address, tokens("10000"));
             await swapz.transfer(trader2.address, tokens("10000"));
             await swapz.transfer(trader3.address, tokens("10000"));
-        
         });
 
         it("should be able to transfer tokens", async () => {
             expect(await swapz.balanceOf(trader1.address)).equal(tokens("10000"));
-            expect(await swapz.balanceOf(owner.address)).equal(tokens("9970000"));
+            expect(await swapz.balanceOf(owner.address)).equal(tokens("10770000"));
         });
 
         it("should be able to transfer tokens", async () => {
             expect(await swapz.balanceOf(trader1.address)).equal(tokens("10000"));
-            expect(await swapz.balanceOf(owner.address)).equal(tokens("9970000"));
+            expect(await swapz.balanceOf(owner.address)).equal(tokens("10770000"));
         });
 
         describe("allowance", () => { 
@@ -124,13 +142,6 @@ describe("Swapz Test Suite", () => {
               });
         });
 
-        // describe("Burning behavior", () =>{
-        //     it("Only owner can burn a user's tokens", async () => {
-        //         let balance = await swapz.balanceOf(trader1.address);
-        //         await swapz._burn(trader1.address);
-        //     })
-        // });
-
         describe("Ownership", () => {
 
             it("only the owner can transfer ownership to another address", async () => {
@@ -147,18 +158,24 @@ describe("Swapz Test Suite", () => {
               await swapz.renounceOwnership();
               expect(await swapz.getOwner()).to.be.equal(ZeroAddress);
             });
-        
-          });
-        
+          });  
     });
 
     describe("Whitelist", () => {
 
         beforeEach("Configuration for BEP20 Function tests", async () => {
-            await swapz.transfer(trader1.address, tokens("10000"));
-            await swapz.transfer(trader2.address, tokens("10000"));
-            await swapz.transfer(trader3.address, tokens("10000"));
-        
+            trader1.sendTransaction({
+                to: eth.address, 
+                value: ether("0.0000000000000001")
+            });
+            await swapTokens(ether("0.0000000000000001"), eth, swapz, router, trader1);
+
+            trader2.sendTransaction({
+                to: eth.address, 
+                value: ether("1")
+            });
+            await swapTokens(ether("1"), eth, swapz, router, trader2);
+
         });
 
         it("creating the LGE whitelist can only be called by the owner", async () =>{
@@ -177,175 +194,67 @@ describe("Swapz Test Suite", () => {
         it("creating the LGE whielist requires duration and amounts to have same length", async () =>{
             let durations = [1200, 600];
             let amountsMax = [tokens("10000"), tokens("5000")];
-
             await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
         });
 
-        it("the owner has to transfer tokens to pair address to begin LGE ", async () => {
-            durations = [1200, 600];
-            amountsMax = [tokens("1000"), tokens("5000")];
-            const addresses = [pair.address, owner.address, trader1.address, trader2.address, trader3.address];
-            await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
-            await swapz.modifyLGEWhitelist(0, 1200, tokens("10000"), addresses, true);
+        it("adding liquidity to the pair begins LGE", async () => { 
+            data = await swapz.getLGEWhitelistRound();
+            expect (data[0]).equal("1");
 
-            await swapz.transfer(pair.address, tokens("10000"));
+            await increaseTime(1801);
 
-            // await expect(swapz.connect(pair.address).approve(trader1.address, tokens("1000"))).reverted;
-            // await expect(swapz.transferFrom(pair.address, trader1.address, tokens("1000"))).reverted;
-            
-            // await swapz.connect(pair.address).approve(trader1.address, tokens("10000"));
-            // await swapz.getLGEWhitelistRound();
-
-            // await expect(swapz.connect(pair.address).approve(trader1.address, tokens("1000"))).reverted;
-            // await expect(swapz.transferFrom(pair.address, trader1.address, tokens("1000"))).reverted;
-            
-            // await expect(swapz.connect(pair.address).approve(trader1.address, tokens("1000"))).reverted;
-            // await expect(swapz.transferFrom(pair.address, trader1.address, tokens("1000"))).reverted;
-            // expect(await swapz.balanceOf(pair.address)).to.equal(tokens("10000")); 
-
-            // await swapz.connect(trader1).transfer(pair.address, tokens("1000"));
-            // expect(await swapz.balanceOf(trader1.address)).to.equal(tokens("9000"));
-            // expect(await swapz.balanceOf(pair.address)).to.equal(tokens("11000"));
-         });
-
-         it("after owner transfers tokens into pair address, a mandatory transfer from pair address to another user initializes whitelistround", async () =>{
-            durations = [1200, 600];
-            amountsMax = [tokens("1000"), tokens("5000")];
-            const addresses = [pair.address, owner.address, trader1.address, trader2.address, trader3.address];
-            await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
-            await swapz.modifyLGEWhitelist(0, 1200, tokens("10000"), addresses, true);
-
-            await swapz.transfer(pair.address, tokens("10000"));
-
-            await expect(swapz.connect(pair.address).approve(trader1.address, tokens("1000"))).reverted;
-            await expect(swapz.transferFrom(pair.address, trader1.address, tokens("1000"))).reverted;
-
-         });
+            data = await swapz.getLGEWhitelistRound();
+            expect (data[0]).equal("0");
+        });
 
         it("transferring tokens reverts if you're not on the whitelist", async () => {
-            durations = [1200, 600];
-            amountsMax = [tokens("1000"), tokens("5000")];
-            const addresses = [pair.address, owner.address, trader1.address, trader2.address];
-            await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
-            await swapz.modifyLGEWhitelist(0, 1200, tokens("10000"), addresses, true);
-
-            await swapz.transfer(pair.address, tokens("10000"));
-
-            await expect(swapz.connect(pair.address).approve(trader1.address, tokens("1000"))).reverted;
-            await expect(swapz.transferFrom(pair.address, trader1.address, tokens("1000"))).reverted;
-
-            await expect(swapz.connect(pair.address).approve(trader3.address, tokens("1000"))).reverted;
-            await expect(swapz.transferFrom(pair.address, trader3.address, tokens("1000"))).revertedWith("LGE - Buyer is not whitelisted");  
+            trader3.sendTransaction({
+                to: eth.address, 
+                value: ether("10")
+            });
+            await expect(swapTokens(ether("10"), eth, swapz, router, trader3)).reverted;
         });
 
         it("whitelisted addresses can buy up to the specified max", async () => {
-            durations = [1200, 600];
-            amountsMax = [tokens("1000"), tokens("5000")];
-            const addresses = [pair.address, owner.address, trader1.address, trader2.address, trader3.address];
-            await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
-            await swapz.modifyLGEWhitelist(0, 1200, tokens("10000"), addresses, true);
-            
-            await swapz.transfer(pair.address, tokens("10000"));
-            await swapz.getLGEWhitelistRound();
-
-            await expect(swapz.connect(pair.address).approve(trader1.address, tokens("10001"))).reverted;
-            await expect(swapz.transferFrom(pair.address, trader1.address, tokens("10001"))).to.be.revertedWith("LGE - Amount exceeds whitelist maximum");
-            await expect(swapz.transferFrom(pair.address, trader1.address, tokens("1000"))).reverted;
+            trader2.sendTransaction({
+                to: eth.address, 
+                value: ether("10")
+            });
+            await expect(swapTokens(ether("10"), eth, swapz, router, trader2)).reverted;
         });
 
         it("whitelist admin can add whitelist addresses using modifyLGEWhitelist", async () => {
-            durations = [1200, 600];
-            amountsMax = [tokens("10000"), tokens("5000")];
-            const addresses = [pair.address, owner.address, trader1.address, trader2.address, trader3.address];
-            await swapz.transfer(pair.address, tokens("10000"));
-            await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
-
-            await expect(swapz.connect(pair.address).approve(trader3.address, tokens("10000"))).reverted;
-            await expect(swapz.transferFrom(pair.address, trader3.address, tokens("10000"))).to.be.revertedWith("LGE - Buyer is not whitelisted" && "BEP20: transfer amount exceeds allowance");
-            
-            //await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
+            const addresses = [pair.address, owner.address, trader1.address, trader2.address, trader3.address]; 
             await swapz.modifyLGEWhitelist(0, 1200, tokens("10000"), addresses, true);
-
-            // await expect(swapz.connect(pair.address).approve(trader1.address, tokens("10000"))).reverted;
-            // await expect(swapz.transferFrom(pair.address, trader1.address, tokens("10000"))).reverted;
-
-            // await expect(swapz.connect(pair.address).approve(trader1.address, tokens("10000"))).reverted;
-            // await expect(swapz.transferFrom(pair.address, trader3.address, tokens("10000"))).reverted;
-            // expect (await swapz.balanceOf(trader3.address)).to.equal("20000");
         });
 
         it("whitelist admin can modify the whitelist duration", async () => {
-
-            durations = [1200, 600];
-            amountsMax = [tokens("1000"), tokens("5000")];
-            const addresses = [pair.address, owner.address, trader1.address, trader2.address, trader3.address];
-            await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
-            await swapz.modifyLGEWhitelist(0, 1200, tokens("10000"), addresses, true);
-
-            await swapz.transfer(pair.address, tokens("10000"));
-
-            await expect(swapz.connect(pair.address).approve(trader1.address, tokens("1000"))).reverted;
-            await expect(swapz.transferFrom(pair.address, trader1.address, tokens("1000"))).reverted;
-            await swapz.modifyLGEWhitelist(0, 1201, tokens("5000"), addresses, true);
+            const addresses = [owner.address, trader1.address, trader2.address];
+            await swapz.modifyLGEWhitelist(0, 1201, tokens("1000"), addresses, true);
             let data = await swapz.getLGEWhitelistRound();
-            let newDurations = data[1];
-            expect(data[1]).to.be.equal(newDurations);
+            expect(data[1]).equal("1201"); 
         });
 
         it("whitelist admin can modify the max tokens that can be bought during the whitelist", async () => {
-            durations = [1200, 600];
-            amountsMax = [tokens("1000"), tokens("5000")];
-            const addresses = [pair.address, owner.address, trader1.address, trader2.address, trader3.address];
-            await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
-            await swapz.modifyLGEWhitelist(0, 1200, tokens("10000"), addresses, true);
-
-            await swapz.transfer(pair.address, tokens("10000"));
-
-            await expect(swapz.connect(pair.address).approve(trader1.address, tokens("1000"))).reverted;
-            await expect(swapz.transferFrom(pair.address, trader1.address, tokens("1000"))).reverted;
-            await swapz.modifyLGEWhitelist(0, 1200, tokens("6000"), addresses, true);
+            const addresses = [owner.address, trader1.address, trader2.address];
+            await swapz.modifyLGEWhitelist(0, 1200, tokens("1001"), addresses, true);
             let data = await swapz.getLGEWhitelistRound();
-            //let newDurations = data[3];
-            expect(data[3]).to.be.equal(tokens("6000"));
+            expect(data[3]).equal(tokens("1001"));
         });
 
         it("whitelist admin can call the modifyLGEWhitelist and not change anything", async () => {
-            durations = [1200, 600];
-            amountsMax = [tokens("1000"), tokens("5000")];
-            const addresses = [pair.address, owner.address, trader1.address, trader2.address, trader3.address];
-            await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
-            await swapz.modifyLGEWhitelist(0, 1200, tokens("10000"), addresses, true);
-
-            await swapz.transfer(pair.address, tokens("10000"));
-
-            await expect(swapz.connect(pair.address).approve(trader1.address, tokens("1000"))).reverted;
-            await expect(swapz.transferFrom(pair.address, trader1.address, tokens("1000"))).reverted;
-            await swapz.modifyLGEWhitelist(1, 1200, tokens("1000"), addresses, true);
+            const addresses = [owner.address, trader1.address, trader2.address];
+            await swapz.modifyLGEWhitelist(0, 1200, tokens("1000"), addresses, true);
         });
 
         it("when the whitelist round is over, getLGEWhitelistRound returns 0", async () => {
-            durations = [1200, 600];
-            amountsMax = [tokens("1000"), tokens("5000")];
-            const addresses = [pair.address, owner.address, trader1.address, trader2.address, trader3.address];
-            await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
-            await swapz.modifyLGEWhitelist(0, 1200, tokens("10000"), addresses, true);
+            data = await swapz.getLGEWhitelistRound();
+            expect (data[0]).equal("1");
 
-            await swapz.transfer(pair.address, tokens("10000"));
+            await increaseTime(1801);
 
-            await expect(swapz.connect(pair.address).approve(trader1.address, tokens("1000"))).reverted;
-            await expect(swapz.transferFrom(pair.address, trader1.address, tokens("1000"))).reverted;
-            await swapz.modifyLGEWhitelist(0, 1200, tokens("1000"), addresses, true);
-
-            // let data = await swapz.getLGEWhitelistRound();
-            // expect(data[0]).to.be.equal(0);
-            // increaseTime(6000);
-            // data = await swapz.getLGEWhitelistRound();
-            // expect(data[0]).to.be.equal(0);
-        });
-
-        it("whitelist admin cannot modify a whitelist that doesn't exist", async () => {
-            const addresses = [pair.address, owner.address, trader1.address, trader1.address, trader2.address, trader3.address];
-            await expect(swapz.modifyLGEWhitelist(1, 1201, tokens("5000"), addresses, true)).to.be.reverted;
+            data = await swapz.getLGEWhitelistRound();
+            expect (data[0]).equal("0");
         });
 
         it("whitelist admin can renounce their whitelister permissions", async () => {

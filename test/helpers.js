@@ -24,6 +24,10 @@ async function increaseTime(n) {
 
 }
 
+const timeLimit = (n) => {
+    return Math.floor(Date.now() / 1000 + n);
+  }
+
 class Snapshot {
     constructor() {
         this.snapshotId = 0;
@@ -43,5 +47,6 @@ class Snapshot {
 module.exports = {
     maxInt, ZeroAddress,
     ether, tokens, increaseTime,
-    Snapshot
+    Snapshot,
+    timeLimit
 };
