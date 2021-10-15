@@ -92,13 +92,11 @@ describe("Swapz Test Suite", () => {
         
         it("should mint 100,000,000 tokens to the owner account", async () => {
             //await swapz['mint(address, uint256)'](owner.address, tokens("10000000"));
-            // await swapz.mint(tokens("10000000")); // this didn't work!!! look into this
             expect(await swapz.balanceOf(owner.address)).equal(tokens("10800000"));
         });
 
         it("should have deployer as owner", async () => {
             expect(await swapz.getOwner()) .equal(owner.address);
-
         });
 
     });
@@ -109,11 +107,6 @@ describe("Swapz Test Suite", () => {
             await swapz.transfer(trader1.address, tokens("10000"));
             await swapz.transfer(trader2.address, tokens("10000"));
             await swapz.transfer(trader3.address, tokens("10000"));
-        });
-
-        it("should be able to transfer tokens", async () => {
-            expect(await swapz.balanceOf(trader1.address)).equal(tokens("10000"));
-            expect(await swapz.balanceOf(owner.address)).equal(tokens("10770000"));
         });
 
         it("should be able to transfer tokens", async () => {
@@ -139,19 +132,21 @@ describe("Swapz Test Suite", () => {
             it("allows you transfer an address' tokens to another address", async () => {
                 await swapz.connect(trader1).approve(trader2.address, tokens("5"));
                 await swapz.connect(trader2).transferFrom(trader1.address, trader2.address, tokens("5"));
-              });
+            });
         });
 
         describe("Ownership", () => {
 
             it("only the owner can transfer ownership to another address", async () => {
-              await expect(swapz.connect(trader1).transferOwnership(trader1.address)).to.be.reverted;
+              await expect(swapz.connect(trader1).transferOwnership(trader1.address))
+                .to.be.revertedWith("Ownable: caller is not the owner");
               await swapz.transferOwnership(trader1.address);
-              expect(await swapz.getOwner()).to.be.equal(trader1.address);
+              expect(await swapz.getOwner()).equal(trader1.address);
             });
         
             it("owner cannot transfer ownership to the zero address", async () => {
-              await expect(swapz.transferOwnership(ZeroAddress)).to.be.reverted;
+              await expect(swapz.transferOwnership(ZeroAddress))
+                .revertedWith("Ownable: new owner is the zero address");
             });
         
             it("the owner can renounce ownership of the contract", async () => {
@@ -181,20 +176,24 @@ describe("Swapz Test Suite", () => {
         it("creating the LGE whitelist can only be called by the owner", async () =>{
             let durations = [];
             let amountsMax = [];
-            await expect(swapz.connect(trader1).createLGEWhitelist(pair.address, durations, amountsMax)).revertedWith("Caller is not the whitelister");
+            await expect(swapz.connect(trader1).createLGEWhitelist(pair.address, durations, amountsMax))
+                .revertedWith("Caller is not the whitelister");
 
         });
  
         it("creating the LGE whitelist with amounts and durations not having same length will revert", async () => {
             let durations = [1200];
             let amountsMax = [tokens("10000"), tokens("5000")];
-            await expect(swapz.createLGEWhitelist(pair.address, durations, amountsMax)).revertedWith("Invalid whitelist(s)");
+            await expect(swapz.createLGEWhitelist(pair.address, durations, amountsMax))
+                .revertedWith("Invalid whitelist(s)");
         });
 
         it("creating the LGE whielist requires duration and amounts to have same length", async () =>{
             let durations = [1200, 600];
             let amountsMax = [tokens("10000"), tokens("5000")];
             await swapz.createLGEWhitelist(pair.address, durations, amountsMax);
+            const data = await swapz.getLGEWhitelistRound();
+            expect(data[0]).equal(1);
         });
 
         it("adding liquidity to the pair begins LGE", async () => { 
@@ -212,7 +211,8 @@ describe("Swapz Test Suite", () => {
                 to: eth.address, 
                 value: ether("10")
             });
-            await expect(swapTokens(ether("10"), eth, swapz, router, trader3)).reverted;
+            await expect(swapTokens(ether("10"), eth, swapz, router, trader3))
+                .revertedWith("UniswapV2: TRANSFER_FAILED");
         });
 
         it("whitelisted addresses can buy up to the specified max", async () => {
@@ -220,12 +220,15 @@ describe("Swapz Test Suite", () => {
                 to: eth.address, 
                 value: ether("10")
             });
-            await expect(swapTokens(ether("10"), eth, swapz, router, trader2)).reverted;
+            await expect(swapTokens(ether("10"), eth, swapz, router, trader2))
+                .revertedWith("UniswapV2: TRANSFER_FAILED");
         });
 
         it("whitelist admin can add whitelist addresses using modifyLGEWhitelist", async () => {
             const addresses = [pair.address, owner.address, trader1.address, trader2.address, trader3.address]; 
             await swapz.modifyLGEWhitelist(0, 1200, tokens("10000"), addresses, true);
+            for (const address of addresses) 
+                expect(await swapz.isWhitelistedInRound(address)).equal(true);
         });
 
         it("whitelist admin can modify the whitelist duration", async () => {

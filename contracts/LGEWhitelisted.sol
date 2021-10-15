@@ -172,5 +172,11 @@ contract LGEWhitelisted is Context {
         }
         
     }
+
+    function isWhitelistedInRound(address account) external view returns (bool) {
+        (uint256 wlRoundNumber,,,,,) = getLGEWhitelistRound();
+        WhitelistRound storage wlRound = _lgeWhitelistRounds[wlRoundNumber.sub(1)];
+        return wlRound.addresses[account];
+    }
     
 }
